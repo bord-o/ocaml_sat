@@ -1,2 +1,7 @@
-(test
- (name test_ocaml_sat))
+(library
+ (name test_ocaml_sat)
+ (libraries sat)
+ (inline_tests)
+ (preprocess
+  (pps ppx_expect ppx_inline_test))
+ )
