@@ -56,7 +56,19 @@ let rec nnf (form : 'a formula) : 'a normalized =
   | `Imp (`Atom a, `Atom b) -> neg !!a ||| !!b
   | `Eq (`Atom a, `Atom b) -> neg !!a ||| !!b &&& (!!a ||| neg !!b)
   (* Imp and Eq recur as they could result in negating a non atomic formula *)
-  | `Neg v -> 
+  | `Neg (`Conj (a, b)) ->
+      let a' = nnf (neg a) in
+      let b' = nnf (neg b) in
+      a' ||| b'
+  | `Neg (`Dis (a, b)) ->
+      let a' = nnf (neg a) in
+      let b' = nnf (neg b) in
+      a' &&& b'
+  | `Neg (`Imp (a, b)) -> 
+      nnf (a &&& neg b)
+  | `Neg (`Eq (a, b)) ->   
+      nnf ((a &&& neg b) ||| (neg a &&& b))
+  | `Neg v ->
       let v' = nnf v in
       neg v'
   | `Imp (a, b) ->
@@ -71,7 +83,7 @@ let rec nnf (form : 'a formula) : 'a normalized =
         (neg a' ||| b' &&& (a' ||| neg b') : 'a normalized :> 'a formula)
       in
       nnf n
-    (* Everything else is just a map *)
+      (* Everything else is just a map *)
   | `Dis (a, b) ->
       let a' = nnf a in
       let b' = nnf b in
@@ -80,4 +92,3 @@ let rec nnf (form : 'a formula) : 'a normalized =
       let a' = nnf a in
       let b' = nnf b in
       a' &&& b'
-
