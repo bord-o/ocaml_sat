@@ -1,5 +1,6 @@
 type status = Sat | Unsat
 
+(* This type represents a normal propositional logic formula *)
 type 'a formula =
   [ `Conj of 'a formula * 'a formula
   | `Dis of 'a formula * 'a formula
@@ -9,11 +10,23 @@ type 'a formula =
   | `Atom of 'a ]
 [@@deriving show]
 
+(* This type represents a formula that is in CNF *)
 type 'a normalized =
   [ `Conj of 'a normalized * 'a normalized
   | `Dis of 'a normalized * 'a normalized
   | `Neg of 'a normalized
   | `Atom of 'a ]
+[@@deriving show]
+
+type 'a tagged =
+  [> `Atom of string
+  | `Conj of string * 'a * 'a
+  | `Dis of string * 'a * 'a
+  | `Eq of string * 'a * 'a
+  | `Imp of string * 'a * 'a
+  | `Neg of string * 'a ]
+  as
+  'a
 [@@deriving show]
 
 let ( &&& ) x y = `Conj (x, y)
@@ -24,8 +37,9 @@ let ( !! ) x = `Atom x
 let neg x = `Neg x
 let test = !!`A &&& !!`B
 let ( let* ) = Result.bind
+let test_input = neg (!!"P" ||| (!!"Q" &&& neg !!"R"))
 
-let rec eval (form : 'a formula) (interp : ('a * bool) list) =
+let rec eval form (interp : ('a * bool) list) =
   let eval' f = eval f interp in
   match form with
   | `Conj (l, r) ->
@@ -46,49 +60,70 @@ let rec eval (form : 'a formula) (interp : ('a * bool) list) =
 let is_atom = function `Atom _ -> true | _ -> false
 let are_atoms a b = is_atom a && is_atom b
 
-let rec nnf (form : 'a formula) : 'a normalized =
-  match form with
-  | `Atom v -> `Atom v
-  | `Neg (`Neg (`Atom v)) -> `Atom v
-  | `Neg (`Atom _) as n -> n
-  | `Neg (`Conj (`Atom a, `Atom b)) -> neg !!a ||| neg !!b
-  | `Neg (`Dis (`Atom a, `Atom b)) -> neg !!a &&& neg !!b
-  | `Imp (`Atom a, `Atom b) -> neg !!a ||| !!b
-  | `Eq (`Atom a, `Atom b) -> neg !!a ||| !!b &&& (!!a ||| neg !!b)
-  (* Imp and Eq recur as they could result in negating a non atomic formula *)
-  | `Neg (`Conj (a, b)) ->
-      let a' = nnf (neg a) in
-      let b' = nnf (neg b) in
-      a' ||| b'
-  | `Neg (`Dis (a, b)) ->
-      let a' = nnf (neg a) in
-      let b' = nnf (neg b) in
-      a' &&& b'
-  | `Neg (`Imp (a, b)) -> 
-      nnf (a &&& neg b)
-  | `Neg (`Eq (a, b)) ->   
-      nnf ((a &&& neg b) ||| (neg a &&& b))
-  | `Neg v ->
-      let v' = nnf v in
-      neg v'
-  | `Imp (a, b) ->
-      let a' = nnf a in
-      let b' = nnf b in
-      let n : 'a formula = (neg a' ||| b' : 'a normalized :> 'a formula) in
-      nnf n
-  | `Eq (a, b) ->
-      let a' = nnf a in
-      let b' = nnf b in
-      let n : 'a formula =
-        (neg a' ||| b' &&& (a' ||| neg b') : 'a normalized :> 'a formula)
-      in
-      nnf n
-      (* Everything else is just a map *)
-  | `Dis (a, b) ->
-      let a' = nnf a in
-      let b' = nnf b in
-      a' ||| b'
-  | `Conj (a, b) ->
-      let a' = nnf a in
-      let b' = nnf b in
-      a' &&& b'
+(*
+  To do this transform, lets tag the 'a in all formulas except the leaves
+  with an Atom representing the subformula
+ *)
+let tseytin (form : 'a formula) =
+  let name_counter = ref 0 in
+  let sub_name () =
+    let name = "p" ^ string_of_int !name_counter in
+    incr name_counter;
+    name
+  in
+
+  let rec tag (f : 'a formula) =
+    match f with
+    | `Neg a -> `Neg (sub_name (), tag a)
+    | `Dis (a, b) -> `Dis (sub_name (), tag a, tag b)
+    | `Eq (a, b) -> `Eq (sub_name (), tag a, tag b)
+    | `Conj (a, b) -> `Conj (sub_name (), tag a, tag b)
+    | `Imp (a, b) -> `Imp (sub_name (), tag a, tag b)
+    | `Atom _ as a -> a
+  in
+  let get_tag (f : 'b tagged) =
+    match f with
+    | `Neg (t, _) -> t
+    | `Dis (t, _, _) -> t
+    | `Eq (t, _, _) -> t
+    | `Conj (t, _, _) -> t
+    | `Imp (t, _, _) -> t
+    | `Atom t -> t
+  in
+  let rec acc_clauses (f : 'b tagged) : 'd formula list =
+    match f with
+    | `Neg (a, child) ->
+        let b = get_tag child in
+        (* (¬a∨¬b) ∧(b∨a). *)
+        (* let eq_clause = !!t === (neg !!child_tag) in *)
+        let clauses = [
+            neg !!a ||| !!b;
+            !!a ||| !!b
+          ] in
+        clauses @ acc_clauses child
+    | `Dis (a, l_child, r_child) ->
+        let b = get_tag l_child in
+        let c = get_tag r_child in
+        let eq_clause = `Eq(!!a, !!b ||| !!c) in
+        eq_clause :: (acc_clauses l_child @ acc_clauses r_child)
+
+    | `Conj (t, a, b) ->
+        let child_tag_a = get_tag a in
+        let child_tag_b = get_tag b in
+        let eq_clause = `Eq(!!t ,!!child_tag_a &&& !!child_tag_b) in
+        eq_clause :: (acc_clauses a @ acc_clauses b)
+    | `Eq (t, a, b) ->
+        let child_tag_a = get_tag a in
+        let child_tag_b = get_tag b in
+        let eq_clause = `Eq(!!t , (!!child_tag_a === !!child_tag_b)) in
+        eq_clause :: (acc_clauses a @ acc_clauses b)
+    | `Imp (t, a, b) ->
+        let child_tag_a = get_tag a in
+        let child_tag_b = get_tag b in
+        let eq_clause = `Eq(!!t ,!!child_tag_a --> !!child_tag_b) in
+        eq_clause :: (acc_clauses a @ acc_clauses b)
+    | `Atom _ -> []
+  in
+  let tagged = tag form in
+  let c = acc_clauses tagged in
+  c
