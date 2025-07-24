@@ -57,13 +57,6 @@ let rec eval form (interp : ('a * bool) list) =
   | `Eq (l, r) -> eval' (neg l ||| r &&& (l ||| neg r))
   | `Atom v -> interp |> List.assoc_opt v |> Option.to_result ~none:`Unbound
 
-let is_atom = function `Atom _ -> true | _ -> false
-let are_atoms a b = is_atom a && is_atom b
-
-(*
-  To do this transform, lets tag the 'a in all formulas except the leaves
-  with an Atom representing the subformula
- *)
 let tseytin (form : 'a formula) =
   let name_counter = ref 0 in
   let sub_name () =
@@ -131,4 +124,3 @@ let tseytin (form : 'a formula) =
   let tagged = tag form in
   let clauses = acc_clauses tagged in
   clauses
-
