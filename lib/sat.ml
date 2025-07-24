@@ -94,34 +94,45 @@ let tseytin (form : 'a formula) =
     match f with
     | `Neg (a, child) ->
         let b = get_tag child in
-        (* (¬a∨¬b) ∧(b∨a). *)
-        (* let eq_clause = !!t === (neg !!child_tag) in *)
-        let clauses = [
-            neg !!a ||| !!b;
-            !!a ||| !!b
-          ] in
+        let clauses = [ neg !!a ||| neg !!b; !!a ||| !!b ] in
         clauses @ acc_clauses child
+    | `Conj (a, l_child, r_child) ->
+        let a = !!a in
+        let b = !!(get_tag l_child) in
+        let c = !!(get_tag r_child) in
+        let clauses = [ neg a ||| b
+          ; neg a ||| c
+          ; neg b ||| neg c ||| a ] in
+        clauses @ acc_clauses l_child @ acc_clauses r_child
     | `Dis (a, l_child, r_child) ->
-        let b = get_tag l_child in
-        let c = get_tag r_child in
-        let eq_clause = `Eq(!!a, !!b ||| !!c) in
-        eq_clause :: (acc_clauses l_child @ acc_clauses r_child)
-
-    | `Conj (t, a, b) ->
-        let child_tag_a = get_tag a in
-        let child_tag_b = get_tag b in
-        let eq_clause = `Eq(!!t ,!!child_tag_a &&& !!child_tag_b) in
-        eq_clause :: (acc_clauses a @ acc_clauses b)
-    | `Eq (t, a, b) ->
-        let child_tag_a = get_tag a in
-        let child_tag_b = get_tag b in
-        let eq_clause = `Eq(!!t , (!!child_tag_a === !!child_tag_b)) in
-        eq_clause :: (acc_clauses a @ acc_clauses b)
-    | `Imp (t, a, b) ->
-        let child_tag_a = get_tag a in
-        let child_tag_b = get_tag b in
-        let eq_clause = `Eq(!!t ,!!child_tag_a --> !!child_tag_b) in
-        eq_clause :: (acc_clauses a @ acc_clauses b)
+        let a = !!a in
+        let b = !!(get_tag l_child) in
+        let c = !!(get_tag r_child) in
+        let clauses = [ neg a ||| b ||| c;
+           neg b ||| a;
+            neg c ||| a ] in
+        clauses @ acc_clauses l_child @ acc_clauses r_child
+    | `Eq (a, l_child, r_child) ->
+        let a = !!a in
+        let b = !!(get_tag l_child) in
+        let c = !!(get_tag r_child) in
+        let clauses = [
+          neg a ||| neg b ||| c;
+          neg a ||| b ||| neg c;
+          a ||| neg b ||| neg c;
+          a ||| b ||| c;
+          ] in
+        clauses @ acc_clauses l_child @ acc_clauses r_child
+    | `Imp (a, l_child, r_child) ->
+        let a = !!a in
+        let b = !!(get_tag l_child) in
+        let c = !!(get_tag r_child) in
+        let clauses = [
+          neg a ||| neg b ||| c;
+          a ||| b;
+          a ||| neg c
+          ] in
+        clauses @ acc_clauses l_child @ acc_clauses r_child
     | `Atom _ -> []
   in
   let tagged = tag form in
