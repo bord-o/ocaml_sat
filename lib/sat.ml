@@ -57,7 +57,7 @@ let rec eval form (interp : ('a * bool) list) =
   | `Eq (l, r) -> eval' (neg l ||| r &&& (l ||| neg r))
   | `Atom v -> interp |> List.assoc_opt v |> Option.to_result ~none:`Unbound
 
-let tseytin (form : 'a formula) =
+let tseytin (form : string formula) =
   let name_counter = ref 0 in
   let sub_name () =
     let name = "p" ^ string_of_int !name_counter in
@@ -65,8 +65,7 @@ let tseytin (form : 'a formula) =
     name
   in
 
-  let rec tag (f : 'a formula) =
-    match f with
+  let rec tag = function
     | `Neg a -> `Neg (sub_name (), tag a)
     | `Dis (a, b) -> `Dis (sub_name (), tag a, tag b)
     | `Eq (a, b) -> `Eq (sub_name (), tag a, tag b)
@@ -74,8 +73,7 @@ let tseytin (form : 'a formula) =
     | `Imp (a, b) -> `Imp (sub_name (), tag a, tag b)
     | `Atom _ as a -> a
   in
-  let get_tag (f : 'b tagged) =
-    match f with
+  let get_tag = function
     | `Neg (t, _) -> t
     | `Dis (t, _, _) -> t
     | `Eq (t, _, _) -> t
@@ -88,8 +86,7 @@ let tseytin (form : 'a formula) =
     let c = !!(get_tag r) in
     (b, c)
   in
-  let rec acc_clauses (f : 'b tagged) : 'd formula list =
-    match f with
+  let rec acc_clauses = function
     | `Neg (a, child) ->
         let a = !!a in
         let b = !!(get_tag child) in
@@ -122,5 +119,5 @@ let tseytin (form : 'a formula) =
     | `Atom _ -> []
   in
   let tagged = tag form in
-  let clauses = acc_clauses tagged in
+  let clauses : string normalized list = acc_clauses tagged in
   clauses
