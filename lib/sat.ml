@@ -1,123 +1,109 @@
-type status = Sat | Unsat
+include Formula
+open Formula
+open Dimacs
+(* include Formula *)
+(* include Dimacs *)
 
-(* This type represents a normal propositional logic formula *)
-type 'a formula =
-  [ `Conj of 'a formula * 'a formula
-  | `Dis of 'a formula * 'a formula
-  | `Neg of 'a formula
-  | `Imp of 'a formula * 'a formula
-  | `Eq of 'a formula * 'a formula
-  | `Atom of 'a ]
-[@@deriving show]
+let test_cnf = load "/Users/brodylittle/Git/ocaml_sat/test/aim-100-1_6-no-1.cnf"
+let load = load
 
-(* This type represents a formula that is in CNF *)
-type 'a normalized =
-  [ `Conj of 'a normalized * 'a normalized
-  | `Dis of 'a normalized * 'a normalized
-  | `Neg of 'a normalized
-  | `Atom of 'a ]
-[@@deriving show]
+type status = Sat | Unsat [@@deriving show] 
 
-type 'a tagged =
-  [> `Atom of string
-  | `Conj of string * 'a * 'a
-  | `Dis of string * 'a * 'a
-  | `Eq of string * 'a * 'a
-  | `Imp of string * 'a * 'a
-  | `Neg of string * 'a ]
-  as
-  'a
-[@@deriving show]
+(*
+  Go through clauses
+  If P = true:
+    Remove all clauses containing Pos "P" (they're satisfied)
+    Remove Neg "P" from all other clauses (it becomes false)
+  If P = false:
+    Remove all clauses containing Neg "P" (they're satisfied)
+    Remove Pos "P" from all other clauses (it becomes false)
+*)
+(* return None if it should be removed, otherwise remove P and return some List *)
 
-let ( &&& ) x y = `Conj (x, y)
-let ( ||| ) x y = `Dis (x, y)
-let ( --> ) x y = `Imp (x, y)
-let ( === ) x y = `Eq (x, y)
-let ( !! ) x = `Atom x
-let neg x = `Neg x
-let test = !!`A &&& !!`B
-let ( let* ) = Result.bind
-let test_input = neg (!!"P" ||| (!!"Q" &&& neg !!"R"))
+type assignment = string * bool
 
-let rec eval form (interp : ('a * bool) list) =
-  let eval' f = eval f interp in
-  match form with
-  | `Conj (l, r) ->
-      let* l_val = eval' l in
-      let* r_val = eval' r in
-      Ok (l_val && r_val)
-  | `Dis (l, r) ->
-      let* l_val = eval' l in
-      let* r_val = eval' r in
-      Ok (l_val || r_val)
-  | `Neg f ->
-      let* val' = eval' f in
-      Ok (not val')
-  | `Imp (l, r) -> eval' (neg l ||| r)
-  | `Eq (l, r) -> eval' (neg l ||| r &&& (l ||| neg r))
-  | `Atom v -> interp |> List.assoc_opt v |> Option.to_result ~none:`Unbound
+let simplify ((v, assign) : assignment) (clause : clause) =
+  if assign && clause |> List.mem (Pos v) then None
+  else if (not assign) && clause |> List.mem (Neg v) then None
+  else
+    let simplified =
+      clause
+      |> List.filter_map @@ fun p ->
+         match p with
+         | Pos a -> if a = v && not assign then None else Some (Pos a)
+         | Neg a -> if a = v && assign then None else Some (Neg a)
+    in
+    Some simplified
 
-let tseytin (form : string formula) =
-  let name_counter = ref 0 in
-  let sub_name () =
-    let name = "p" ^ string_of_int !name_counter in
-    incr name_counter;
-    name
+(* None means that there were no unit clauses, a result means they have been simplified *)
+let unit_prop clauses =
+  let is_unit : clause -> literal option = function
+    | [ p ] -> Some p
+    | _ -> None
   in
+  let rec first_unit_opt : clause_set -> literal option = function
+    | [] -> None
+    | p :: ps -> (
+        match is_unit p with None -> first_unit_opt ps | Some p' -> Some p')
+  in
+  match first_unit_opt clauses with
+  | None -> None
+  | Some (Pos c) ->
+      print_endline @@ "Hit unit prop with" ^ c;
+      let assignment = (c, true) in
+      Some (clauses |> List.filter_map @@ simplify assignment)
+  | Some (Neg c) ->
+      print_endline @@ "Hit unit prop with" ^ c;
+      let assignment = (c, false) in
+      Some (clauses |> List.filter_map @@ simplify assignment)
 
-  let rec tag = function
-    | `Neg a -> `Neg (sub_name (), tag a)
-    | `Dis (a, b) -> `Dis (sub_name (), tag a, tag b)
-    | `Eq (a, b) -> `Eq (sub_name (), tag a, tag b)
-    | `Conj (a, b) -> `Conj (sub_name (), tag a, tag b)
-    | `Imp (a, b) -> `Imp (sub_name (), tag a, tag b)
-    | `Atom _ as a -> a
+(* This is optional *)
+let literal_elim clauses =
+  let pures = pure_literals clauses in
+  match List.nth_opt pures 0 with
+  | None -> None
+  | Some (Pos c) ->
+  print_endline "Hit literal elimination";
+      let assignment = (c, true) in
+      Some (clauses |> List.filter_map @@ simplify assignment)
+  | Some (Neg c) ->
+  print_endline "Hit literal elimination";
+      let assignment = (c, false) in
+      Some (clauses |> List.filter_map @@ simplify assignment)
+
+let resolve clauses =
+  let pures = pure_literals clauses in
+  let resolv_var =
+    clauses
+    |> List.find_map @@ fun c ->
+       List.find_opt (fun var -> not (pures |> List.mem var )) c
   in
-  let get_tag = function
-    | `Neg (t, _) -> t
-    | `Dis (t, _, _) -> t
-    | `Eq (t, _, _) -> t
-    | `Conj (t, _, _) -> t
-    | `Imp (t, _, _) -> t
-    | `Atom t -> t
-  in
-  let child_tags l r =
-    let b = !!(get_tag l) in
-    let c = !!(get_tag r) in
-    (b, c)
-  in
-  let rec acc_clauses = function
-    | `Neg (a, child) ->
-        let a = !!a in
-        let b = !!(get_tag child) in
-        [ neg a ||| neg b; a ||| b ] @ acc_clauses child
-    | `Conj (a, l_child, r_child) ->
-        let a = !!a in
-        let b, c = child_tags l_child r_child in
-        [ neg a ||| b; neg a ||| c; neg b ||| neg c ||| a ]
-        @ acc_clauses l_child @ acc_clauses r_child
-    | `Dis (a, l_child, r_child) ->
-        let a = !!a in
-        let b, c = child_tags l_child r_child in
-        [ neg a ||| b ||| c; neg b ||| a; neg c ||| a ]
-        @ acc_clauses l_child @ acc_clauses r_child
-    | `Eq (a, l_child, r_child) ->
-        let a = !!a in
-        let b, c = child_tags l_child r_child in
-        [
-          neg a ||| neg b ||| c;
-          neg a ||| b ||| neg c;
-          a ||| neg b ||| neg c;
-          a ||| b ||| c;
-        ]
-        @ acc_clauses l_child @ acc_clauses r_child
-    | `Imp (a, l_child, r_child) ->
-        let a = !!a in
-        let b, c = child_tags l_child r_child in
-        [ neg a ||| neg b ||| c; a ||| b; a ||| neg c ]
-        @ acc_clauses l_child @ acc_clauses r_child
-    | `Atom _ -> []
-  in
-  let tagged = tag form in
-  let clauses : string normalized list = acc_clauses tagged in
-  clauses
+  match resolv_var with
+  | None -> clauses
+  (* Need to find two clauses with opposing vars and combine them, removing our var and its negation *)
+  | Some v ->
+    let res = clauses |> List.find_opt @@ fun clause -> clause |> List.exists @@ fun var -> same_sign v var in
+    let opp = clauses |> List.find_opt @@ fun clause -> clause |> List.exists @@ fun var -> opposite_sign v var in
+    match res, opp with
+    | Some r, Some o ->
+      print_endline @@ "Hit resolution with " ^ (name v);
+      let combined = r @ o |> List.filter @@ fun rv -> not (name rv = name v) in
+      combined :: clauses |> List.filter @@ fun c -> c <> r && c <> o
+    | _, _ -> failwith "couldn't resolve"
+
+let has_empty_clause = List.exists List.is_empty
+
+let rec dp (clauses : clause_set) =
+  print_endline @@ show_clause_set clauses;
+  ignore @@ read_line ();
+  match unit_prop clauses with
+  | Some cs -> dp cs
+  | None -> (
+      (* match literal_elim clauses with *)
+      (* | Some cs -> dp cs *)
+      (* | None -> *)
+          if List.is_empty clauses then Sat
+          else if has_empty_clause clauses then Unsat
+          else dp (resolve clauses))
+
+let sat f = load f |> dp

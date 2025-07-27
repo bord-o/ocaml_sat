@@ -2,3 +2,8 @@
  (name sat)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.map ppx_deriving.fold)))
+
+(ocamllex lexer)
+
+(menhir
+ (modules parser))

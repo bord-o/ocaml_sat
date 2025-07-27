@@ -9,6 +9,8 @@
 
 (authors "Author Name <author@example.com>")
 
+(using menhir 2.1)
+
 (maintainers "Maintainer Name <maintainer@example.com>")
 
 (license LICENSE)
