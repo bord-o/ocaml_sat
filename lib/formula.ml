@@ -161,15 +161,20 @@ let literals (cnf : clause_set) =
   tbl |> Hashtbl.to_seq_keys |> List.of_seq
 
 let pure_literals (cnf : clause_set) =
-  let tbl = Hashtbl.create 100 in
+  let var_forms = Hashtbl.create 100 in
   cnf |> List.flatten
   |> List.iter (fun literal ->
-         match literal with
-         | Pos c as l ->
-             if Hashtbl.mem tbl (Neg c) then Hashtbl.remove tbl (Neg c)
-             else Hashtbl.replace tbl l ()
-         | Neg c as l ->
-             if Hashtbl.mem tbl (Pos c) then Hashtbl.remove tbl (Pos c)
-             else Hashtbl.replace tbl l ());
-
-  tbl |> Hashtbl.to_seq_keys |> List.of_seq
+         let var_name = match literal with Pos v | Neg v -> v in
+         let current_forms = Hashtbl.find_opt var_forms var_name |> Option.value ~default:[] in
+         Hashtbl.replace var_forms var_name (literal :: current_forms));
+  
+  let pure_lits = ref [] in
+  Hashtbl.iter (fun _var forms ->
+    let has_pos = List.exists (function Pos _ -> true | _ -> false) forms in
+    let has_neg = List.exists (function Neg _ -> true | _ -> false) forms in
+    if has_pos && not has_neg then
+      pure_lits := (List.find (function Pos _ -> true | _ -> false) forms) :: !pure_lits
+    else if has_neg && not has_pos then
+      pure_lits := (List.find (function Neg _ -> true | _ -> false) forms) :: !pure_lits
+  ) var_forms;
+  !pure_lits
