@@ -10,14 +10,19 @@ type 'a formula =
 
 type literal =
   | Pos of string [@printer fun fmt s -> Format.pp_print_string fmt s]
-  | Neg of string [@printer fun fmt s -> Format.pp_print_string fmt ("¬"^s)] [@@deriving show]
+  | Neg of string [@printer fun fmt s -> Format.pp_print_string fmt ("¬" ^ s)]
+[@@deriving show]
 
 let name = function Pos n -> n | Neg n -> n
-let opposite_sign  a b = match a, b with
+
+let opposite_sign a b =
+  match (a, b) with
   | Pos m, Neg n when m = n -> true
   | Neg m, Pos n when m = n -> true
   | _ -> false
-let same_sign a b = match a, b with
+
+let same_sign a b =
+  match (a, b) with
   | Pos m, Pos n when m = n -> true
   | Neg m, Neg n when m = n -> true
   | _ -> false
@@ -165,16 +170,21 @@ let pure_literals (cnf : clause_set) =
   cnf |> List.flatten
   |> List.iter (fun literal ->
          let var_name = match literal with Pos v | Neg v -> v in
-         let current_forms = Hashtbl.find_opt var_forms var_name |> Option.value ~default:[] in
+         let current_forms =
+           Hashtbl.find_opt var_forms var_name |> Option.value ~default:[]
+         in
          Hashtbl.replace var_forms var_name (literal :: current_forms));
-  
+
   let pure_lits = ref [] in
-  Hashtbl.iter (fun _var forms ->
-    let has_pos = List.exists (function Pos _ -> true | _ -> false) forms in
-    let has_neg = List.exists (function Neg _ -> true | _ -> false) forms in
-    if has_pos && not has_neg then
-      pure_lits := (List.find (function Pos _ -> true | _ -> false) forms) :: !pure_lits
-    else if has_neg && not has_pos then
-      pure_lits := (List.find (function Neg _ -> true | _ -> false) forms) :: !pure_lits
-  ) var_forms;
+  Hashtbl.iter
+    (fun _var forms ->
+      let has_pos = List.exists (function Pos _ -> true | _ -> false) forms in
+      let has_neg = List.exists (function Neg _ -> true | _ -> false) forms in
+      if has_pos && not has_neg then
+        pure_lits :=
+          List.find (function Pos _ -> true | _ -> false) forms :: !pure_lits
+      else if has_neg && not has_pos then
+        pure_lits :=
+          List.find (function Neg _ -> true | _ -> false) forms :: !pure_lits)
+    var_forms;
   !pure_lits

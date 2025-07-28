@@ -1,6 +1,5 @@
 open Formula
 
-
 let to_formula (dimacs : int list list) =
   dimacs
   |> List.map (fun raw_clause ->
