@@ -7,7 +7,9 @@ let to_formula (dimacs : int list list) =
          |> List.map (fun variable_idx ->
                 if variable_idx < 0 then
                   Neg (string_of_int (Int.neg variable_idx))
-                else Pos (string_of_int variable_idx)))
+                else Pos (string_of_int variable_idx))
+         |> LiteralSet.of_list)
+  |> ClauseSet.of_list
 
 let load filename =
   try

@@ -13,6 +13,18 @@ type literal =
   | Neg of string [@printer fun fmt s -> Format.pp_print_string fmt ("¬" ^ s)]
 [@@deriving show]
 
+module LiteralSet = Set.Make(struct
+  type t = literal
+  let compare = compare
+end)
+
+module ClauseSet = Set.Make(struct
+  type t = LiteralSet.t
+  let compare = LiteralSet.compare
+end)
+
+module StringSet = Set.Make(String)
+
 let name = function Pos n -> n | Neg n -> n
 
 let opposite_sign a b =
@@ -27,8 +39,25 @@ let same_sign a b =
   | Neg m, Neg n when m = n -> true
   | _ -> false
 
-type clause = literal list [@@deriving show]
-type clause_set = clause list [@@deriving show]
+type clause = LiteralSet.t
+type clause_set = ClauseSet.t
+
+let pp_literal fmt = function
+  | Pos s -> Format.pp_print_string fmt s
+  | Neg s -> Format.pp_print_string fmt ("¬" ^ s)
+
+let pp_clause fmt clause =
+  Format.fprintf fmt "[%a]"
+    (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.pp_print_string fmt "; ") pp_literal)
+    (LiteralSet.elements clause)
+
+let pp_clause_set fmt clause_set =
+  Format.fprintf fmt "[%a]"
+    (Format.pp_print_list ~pp_sep:(fun fmt () -> Format.pp_print_string fmt "; ") pp_clause)
+    (ClauseSet.elements clause_set)
+
+let show_clause = Format.asprintf "%a" pp_clause
+let show_clause_set = Format.asprintf "%a" pp_clause_set
 
 let ( &&& ) x y = `Conj (x, y)
 let ( ||| ) x y = `Dis (x, y)
@@ -91,37 +120,37 @@ let tseytin (form : string formula) : clause_set =
     | `Neg (a, child) ->
         let a = a in
         let b = get_tag child in
-        [ [ Neg a; Neg b ]; [ Pos a; Pos b ] ] @ acc_clauses child
+        [ LiteralSet.of_list [ Neg a; Neg b ]; LiteralSet.of_list [ Pos a; Pos b ] ] @ acc_clauses child
     | `Conj (a, l_child, r_child) ->
         let a = a in
         let b, c = child_tags l_child r_child in
-        [ [ Neg a; Pos b ]; [ Neg a; Pos c ]; [ Neg b; Neg c; Pos a ] ]
+        [ LiteralSet.of_list [ Neg a; Pos b ]; LiteralSet.of_list [ Neg a; Pos c ]; LiteralSet.of_list [ Neg b; Neg c; Pos a ] ]
         @ acc_clauses l_child @ acc_clauses r_child
     | `Dis (a, l_child, r_child) ->
         let a = a in
         let b, c = child_tags l_child r_child in
-        [ [ Neg a; Pos b; Pos c ]; [ Neg b; Pos a ]; [ Neg c; Pos a ] ]
+        [ LiteralSet.of_list [ Neg a; Pos b; Pos c ]; LiteralSet.of_list [ Neg b; Pos a ]; LiteralSet.of_list [ Neg c; Pos a ] ]
         @ acc_clauses l_child @ acc_clauses r_child
     | `Eq (a, l_child, r_child) ->
         let a = a in
         let b, c = child_tags l_child r_child in
         [
-          [ Neg a; Neg b; Pos c ];
-          [ Neg a; Pos b; Neg c ];
-          [ Pos a; Neg b; Neg c ];
-          [ Pos a; Pos b; Pos c ];
+          LiteralSet.of_list [ Neg a; Neg b; Pos c ];
+          LiteralSet.of_list [ Neg a; Pos b; Neg c ];
+          LiteralSet.of_list [ Pos a; Neg b; Neg c ];
+          LiteralSet.of_list [ Pos a; Pos b; Pos c ];
         ]
         @ acc_clauses l_child @ acc_clauses r_child
     | `Imp (a, l_child, r_child) ->
         let a = a in
         let b, c = child_tags l_child r_child in
-        [ [ Neg a; Neg b; Pos c ]; [ Pos a; Pos b ]; [ Pos a; Neg c ] ]
+        [ LiteralSet.of_list [ Neg a; Neg b; Pos c ]; LiteralSet.of_list [ Pos a; Pos b ]; LiteralSet.of_list [ Pos a; Neg c ] ]
         @ acc_clauses l_child @ acc_clauses r_child
     | `Atom _ -> []
   in
   let tagged = tag form in
   let clauses = acc_clauses tagged in
-  clauses
+  ClauseSet.of_list clauses
 
 let rec disjunct ~clauses =
   match clauses with
@@ -157,23 +186,26 @@ let variables form =
   tbl |> Hashtbl.to_seq_keys |> List.of_seq
 
 let literals (cnf : clause_set) =
-  let tbl = Hashtbl.create 100 in
-  cnf |> List.flatten
-  |> List.iter (fun literal ->
-         let res = match literal with Neg c -> c | Pos c -> c in
-
-         Hashtbl.replace tbl res ());
-  tbl |> Hashtbl.to_seq_keys |> List.of_seq
+  let all_vars = ref StringSet.empty in
+  ClauseSet.iter (fun clause ->
+    LiteralSet.iter (fun literal ->
+      let var_name = match literal with Neg c -> c | Pos c -> c in
+      all_vars := StringSet.add var_name !all_vars
+    ) clause
+  ) cnf;
+  StringSet.elements !all_vars
 
 let pure_literals (cnf : clause_set) =
   let var_forms = Hashtbl.create 100 in
-  cnf |> List.flatten
-  |> List.iter (fun literal ->
-         let var_name = match literal with Pos v | Neg v -> v in
-         let current_forms =
-           Hashtbl.find_opt var_forms var_name |> Option.value ~default:[]
-         in
-         Hashtbl.replace var_forms var_name (literal :: current_forms));
+  ClauseSet.iter (fun clause ->
+    LiteralSet.iter (fun literal ->
+      let var_name = match literal with Pos v | Neg v -> v in
+      let current_forms =
+        Hashtbl.find_opt var_forms var_name |> Option.value ~default:[]
+      in
+      Hashtbl.replace var_forms var_name (literal :: current_forms)
+    ) clause
+  ) cnf;
 
   let pure_lits = ref [] in
   Hashtbl.iter
